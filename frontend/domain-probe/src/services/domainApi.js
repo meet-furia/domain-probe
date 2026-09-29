@@ -1,5 +1,7 @@
-const API_URL = 'http://localhost:8080/api/v1/domains/analyze'
-const AI_PROBE_URL = 'http://localhost:8080/api/v1/ai/probe'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+
+const API_URL = `${API_BASE_URL}/api/v1/domains/analyze`
+const AI_PROBE_URL = `${API_BASE_URL}/api/v1/ai/probe`
 
 export async function analyzeDomain(domainName) {
   const response = await fetch(`${API_URL}?domainName=${encodeURIComponent(domainName)}`)
