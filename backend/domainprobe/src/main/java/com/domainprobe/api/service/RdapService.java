@@ -3,7 +3,6 @@ package com.domainprobe.api.service;
 import com.domainprobe.api.config.RdapConfig;
 import com.domainprobe.api.dto.rdap.RdapDomainDTO;
 import com.domainprobe.api.dto.rdap.RdapResponseDTO;
-import com.domainprobe.api.exception.BadRequestException;
 import com.domainprobe.api.exception.ExternalApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,15 +37,22 @@ public class RdapService {
 
     /**
      * Fetches RDAP registration data for the supplied domain.
-     * Returns AVAILABLE when the domain is not registered.
+     * <p>
+     * RDAP is an optional data source for DomainProbe.
+     * If RDAP is unavailable, unsupported, or fails for any reason,
+     * the rest of the domain analysis should continue normally.
      */
     public RdapDomainDTO fetchDomainData(final String domainName) {
 
         try {
             String rawResponse = fetchDomainDataRaw(domainName);
 
+            /*
+             * A null/empty response means RDAP could not provide
+             * registration data.
+             */
             if (!StringUtils.hasText(rawResponse)) {
-                return buildAvailableDomainResponse(domainName);
+                return buildUnavailableDomainResponse(domainName);
             }
 
             RdapResponseDTO response =
@@ -57,26 +63,29 @@ public class RdapService {
 
             return convertToDomainDTO(response, domainName);
 
-        } catch (ExternalApiException exception) {
-            throw exception;
-
         } catch (Exception exception) {
-            log.error(
-                    "Could not convert RDAP response for domain {}",
+
+            /*
+             * RDAP failure must not stop the complete DomainProbe
+             * analysis. Log the problem and return an unavailable
+             * RDAP response instead.
+             */
+            log.warn(
+                    "[RDAP] Registration data unavailable | domain={} | reason={}",
                     domainName,
-                    exception
+                    exception.getMessage()
             );
 
-            throw new ExternalApiException(
-                    "Failed to process RDAP domain response",
-                    exception
-            );
+            return buildUnavailableDomainResponse(domainName);
         }
     }
 
+
     /**
      * RAW RDAP API call to fetch domain data.
-     * Throws ExternalApiException on any failure.
+     * <p>
+     * Returns null when RDAP is unavailable or the TLD is not
+     * supported by the IANA RDAP bootstrap registry.
      */
     private String fetchDomainDataRaw(final String domainName) {
 
@@ -85,6 +94,21 @@ public class RdapService {
         );
 
         String baseUrl = resolveRdapBaseUrl(topLevelDomain);
+
+        /*
+         * No RDAP server is available for this TLD.
+         * Return null instead of throwing an exception so the
+         * complete domain analysis can continue.
+         */
+        if (!StringUtils.hasText(baseUrl)) {
+            log.warn(
+                    "[RDAP] No RDAP server found | domain={} | tld={}",
+                    domainName,
+                    topLevelDomain
+            );
+
+            return null;
+        }
 
         String url = baseUrl + "domain/" + domainName;
 
@@ -95,6 +119,7 @@ public class RdapService {
         );
 
         try {
+
             String rawResponse = webClient
                     .get()
                     .uri(url)
@@ -116,8 +141,13 @@ public class RdapService {
 
         } catch (WebClientResponseException.NotFound exception) {
 
-            log.error(
-                    "[RDAP] 404 | domain={} | url={}",
+            /*
+             * RDAP 404 means the domain was not found in the
+             * RDAP registry. Keep the existing behavior where
+             * this is interpreted as an available domain.
+             */
+            log.info(
+                    "[RDAP] 404 - domain not found | domain={} | url={}",
                     domainName,
                     url
             );
@@ -125,10 +155,18 @@ public class RdapService {
             return null;
 
         } catch (Exception exception) {
-            throw new ExternalApiException(
-                    "Failed to fetch domain data from RDAP",
-                    exception
+
+            /*
+             * RDAP itself failed. Do not allow this to stop the
+             * complete DomainProbe report.
+             */
+            log.warn(
+                    "[RDAP] Request failed | domain={} | reason={}",
+                    domainName,
+                    exception.getMessage()
             );
+
+            return null;
         }
     }
 
@@ -139,30 +177,59 @@ public class RdapService {
 
     /**
      * Resolves the RDAP server responsible for the supplied TLD.
+     * <p>
+     * Returns null when the TLD is not present in the IANA
+     * RDAP bootstrap registry.
      */
     private String resolveRdapBaseUrl(final String topLevelDomain) {
 
-        Map<String, String> services = loadRdapServices();
+        try {
 
-        String baseUrl = services.get(
-                topLevelDomain.toLowerCase(Locale.ROOT)
-        );
+            Map<String, String> services = loadRdapServices();
 
-        if (baseUrl == null) {
-            throw new BadRequestException(
-                    "RDAP is not supported for the supplied top-level domain"
+            String baseUrl = services.get(
+                    topLevelDomain.toLowerCase(Locale.ROOT)
             );
-        }
 
-        return baseUrl;
+            if (baseUrl == null) {
+
+                log.warn(
+                        "[RDAP] TLD not supported by RDAP bootstrap | tld={}",
+                        topLevelDomain
+                );
+
+                return null;
+            }
+
+            return baseUrl;
+
+        } catch (Exception exception) {
+
+            /*
+             * Failure to load/parse the bootstrap registry should
+             * not stop the overall DomainProbe analysis.
+             */
+            log.warn(
+                    "[RDAP] Could not resolve RDAP server | tld={} | reason={}",
+                    topLevelDomain,
+                    exception.getMessage()
+            );
+
+            return null;
+        }
     }
+
 
     /**
      * Loads RDAP bootstrap data from IANA.
+     * <p>
+     * Any failure is propagated to resolveRdapBaseUrl(), where
+     * it is converted into a non-fatal RDAP failure.
      */
     private Map<String, String> loadRdapServices() {
 
         try {
+
             String rawResponse = webClient
                     .get()
                     .uri(rdapConfig.getBootstrapUrl())
@@ -172,6 +239,7 @@ public class RdapService {
                     .block();
 
             if (!StringUtils.hasText(rawResponse)) {
+
                 throw new ExternalApiException(
                         "Empty response received from IANA RDAP bootstrap"
                 );
@@ -179,16 +247,15 @@ public class RdapService {
 
             return parseBootstrap(rawResponse);
 
-        } catch (ExternalApiException exception) {
-            throw exception;
-
         } catch (Exception exception) {
+
             throw new ExternalApiException(
                     "Failed to fetch IANA RDAP bootstrap",
                     exception
             );
         }
     }
+
 
     /**
      * Converts the IANA bootstrap response into a
@@ -199,6 +266,7 @@ public class RdapService {
     ) {
 
         try {
+
             Map<String, String> services = new HashMap<>();
 
             JsonNode root = objectMapper.readTree(rawResponse);
@@ -230,6 +298,7 @@ public class RdapService {
             }
 
             if (services.isEmpty()) {
+
                 throw new ExternalApiException(
                         "IANA RDAP bootstrap did not contain any services"
                 );
@@ -238,9 +307,11 @@ public class RdapService {
             return Map.copyOf(services);
 
         } catch (ExternalApiException exception) {
+
             throw exception;
 
         } catch (Exception exception) {
+
             throw new ExternalApiException(
                     "Failed to parse IANA RDAP bootstrap response",
                     exception
@@ -308,21 +379,31 @@ public class RdapService {
                 .build();
     }
 
+
     /**
-     * Returns AVAILABLE for an RDAP 404 response.
+     * Creates an RDAP response when registration data
+     * cannot be retrieved.
+     * <p>
+     * This is intentionally different from AVAILABLE.
+     * <p>
+     * AVAILABLE means RDAP successfully responded with
+     * a 404 and the domain was not found.
+     * <p>
+     * UNAVAILABLE means RDAP data could not be retrieved.
      */
-    private RdapDomainDTO buildAvailableDomainResponse(
+    private RdapDomainDTO buildUnavailableDomainResponse(
             final String domainName
     ) {
 
         return RdapDomainDTO.builder()
                 .domainName(domainName)
-                .availability(RdapDomainDTO.Availability.AVAILABLE)
+                .availability(null)
                 .statuses(List.of())
                 .nameservers(List.of())
                 .events(List.of())
                 .build();
     }
+
 
     /**
      * Determines domain availability from RDAP statuses.
@@ -361,6 +442,7 @@ public class RdapService {
 
         if (nameserversNode == null
                 || !nameserversNode.isArray()) {
+
             return nameservers;
         }
 
@@ -371,6 +453,7 @@ public class RdapService {
                     .asText(null);
 
             if (StringUtils.hasText(name)) {
+
                 nameservers.add(
                         name.toLowerCase(Locale.ROOT)
                 );
@@ -395,6 +478,7 @@ public class RdapService {
         JsonNode entities = response.getEntities();
 
         if (entities == null || !entities.isArray()) {
+
             return new RegistrarDetails(
                     null,
                     null,
@@ -422,6 +506,7 @@ public class RdapService {
         );
     }
 
+
     /**
      * Checks whether an RDAP entity represents a registrar.
      */
@@ -438,12 +523,14 @@ public class RdapService {
             if ("registrar".equalsIgnoreCase(
                     role.asText()
             )) {
+
                 return true;
             }
         }
 
         return false;
     }
+
 
     /**
      * Reads the registrar name from the RDAP vCard.
@@ -456,6 +543,7 @@ public class RdapService {
 
         if (!vcardArray.isArray()
                 || vcardArray.size() < 2) {
+
             return null;
         }
 
@@ -480,6 +568,7 @@ public class RdapService {
         return null;
     }
 
+
     /**
      * Reads the registrar IANA ID.
      */
@@ -498,6 +587,7 @@ public class RdapService {
             if ("IANA Registrar ID".equalsIgnoreCase(
                     publicId.path("type").asText()
             )) {
+
                 return publicId
                         .path("identifier")
                         .asText(null);
@@ -506,6 +596,7 @@ public class RdapService {
 
         return null;
     }
+
 
     /**
      * Reads the registrar URL from RDAP links.
@@ -525,6 +616,7 @@ public class RdapService {
             if ("about".equalsIgnoreCase(
                     link.path("rel").asText()
             )) {
+
                 return link
                         .path("href")
                         .asText(null);
@@ -554,6 +646,7 @@ public class RdapService {
         JsonNode events = response.getEvents();
 
         if (events == null || !events.isArray()) {
+
             return new EventDates(
                     null,
                     null,
@@ -608,6 +701,7 @@ public class RdapService {
         );
     }
 
+
     /**
      * Parses an RDAP event date.
      */
@@ -624,9 +718,11 @@ public class RdapService {
             return OffsetDateTime.parse(value);
 
         } catch (DateTimeParseException exception) {
+
             return null;
         }
     }
+
 
     /**
      * Calculates the number of days remaining until domain expiration.
@@ -667,11 +763,13 @@ public class RdapService {
                 final String ianaId,
                 final String url
         ) {
+
             this.name = name;
             this.ianaId = ianaId;
             this.url = url;
         }
     }
+
 
     /**
      * Holds RDAP event dates extracted from RDAP.
@@ -687,6 +785,7 @@ public class RdapService {
                 final OffsetDateTime updatedAt,
                 final OffsetDateTime expiresAt
         ) {
+
             this.createdAt = createdAt;
             this.updatedAt = updatedAt;
             this.expiresAt = expiresAt;
