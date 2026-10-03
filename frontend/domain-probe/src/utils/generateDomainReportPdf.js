@@ -69,7 +69,7 @@ export function generateDomainReportPdf(report) {
   }
 
   function section(title) {
-    ensureSpace(27)
+    ensureSpace(31)
     y += 6
     const boxTop = y
     doc.setFillColor(17, 19, 24)
@@ -81,7 +81,7 @@ export function generateDomainReportPdf(report) {
     doc.setFontSize(13)
     doc.setTextColor(190, 180, 255)
     doc.text(title, margin + 5, boxTop + 8.5)
-    y = boxTop + 16
+    y = boxTop + 20
   }
 
   pageHeader()
