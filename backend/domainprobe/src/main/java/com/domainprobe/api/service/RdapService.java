@@ -63,6 +63,15 @@ public class RdapService {
 
             return convertToDomainDTO(response, domainName);
 
+        } catch (WebClientResponseException.NotFound exception) {
+
+            log.info(
+                    "[RDAP] 404 - domain not found | domain={}",
+                    domainName
+            );
+
+            return buildAvailableDomainResponse(domainName);
+
         } catch (Exception exception) {
 
             /*
@@ -141,18 +150,7 @@ public class RdapService {
 
         } catch (WebClientResponseException.NotFound exception) {
 
-            /*
-             * RDAP 404 means the domain was not found in the
-             * RDAP registry. Keep the existing behavior where
-             * this is interpreted as an available domain.
-             */
-            log.info(
-                    "[RDAP] 404 - domain not found | domain={} | url={}",
-                    domainName,
-                    url
-            );
-
-            return null;
+            throw exception;
 
         } catch (Exception exception) {
 
@@ -398,6 +396,19 @@ public class RdapService {
         return RdapDomainDTO.builder()
                 .domainName(domainName)
                 .availability(null)
+                .statuses(List.of())
+                .nameservers(List.of())
+                .events(List.of())
+                .build();
+    }
+
+    private RdapDomainDTO buildAvailableDomainResponse(
+            final String domainName
+    ) {
+
+        return RdapDomainDTO.builder()
+                .domainName(domainName)
+                .availability(RdapDomainDTO.Availability.AVAILABLE)
                 .statuses(List.of())
                 .nameservers(List.of())
                 .events(List.of())

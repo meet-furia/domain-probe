@@ -72,3 +72,5 @@
 @media(prefers-reduced-motion:reduce){.feature-track{animation:none}}
 .feature-row{position:relative;left:50%;width:min(1200px,calc(100vw - 96px));margin:75px 0 0;transform:translateX(-50%)}
 @media(max-width:700px){.feature-row{width:calc(100vw - 40px);margin:55px 0 0}}
+
+.report-wrap.available-report>.report-nav,.report-wrap.available-report>.report-section-title,.report-wrap.available-report>.metrics-grid,.report-wrap.available-report>.detail-grid,.report-wrap.available-report>.dns-section,.report-wrap.available-report>.analysis-section{display:none}
