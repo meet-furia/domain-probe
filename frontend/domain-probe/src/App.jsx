@@ -48,6 +48,22 @@ function App() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState(reportSections[0][0])
+
+  useEffect(() => {
+    if (!report || !('IntersectionObserver' in window)) return undefined
+    setActiveSection(reportSections[0][0])
+    const headings = reportSections.map(([id]) => document.getElementById(id)).filter(Boolean)
+    const observer = new IntersectionObserver((entries) => {
+      const visibleHeadings = entries.filter((entry) => entry.isIntersecting)
+      if (visibleHeadings.length) {
+        visibleHeadings.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        setActiveSection(visibleHeadings[0].target.id)
+      }
+    }, { rootMargin: '-15% 0px -72% 0px', threshold: 0 })
+    headings.forEach((heading) => observer.observe(heading))
+    return () => observer.disconnect()
+  }, [report])
 
   useEffect(() => {
     if (!aiOpen) return undefined
@@ -254,7 +270,7 @@ function App() {
 
       {report && <section className="report-wrap">
         <div className="report-toolbar"><button className="back-link" onClick={() => { setReport(null); setDomain(''); setError(''); setAiOpen(false); history.pushState({}, '', '/') }}>← <span>New analysis</span></button><div className="report-actions"><div className="action-with-info"><button type="button" className="generate-button" onClick={openAiProbe} disabled={aiLoading}>{aiLoading ? <><span className="button-spinner"/> Analyzing...</> : `${String.fromCodePoint(0x2728)} ${aiProbe ? 'AI Probe' : aiError ? 'Try Again' : 'Generate AI Probe'}`}</button>{actionInfo('AI Probe', 'Opens an AI-generated summary of this domain report, with key findings and recommendations.')}</div><div className="action-with-info"><button type="button" className="generate-button" onClick={generatePdf} disabled={generating}>{generating ? 'Generating...' : 'Download Report'} <span>↓</span></button>{actionInfo('Download Report', 'Downloads a PDF copy of the domain report so you can save or share the findings.')}</div></div></div>
-        <nav className="report-nav" aria-label="Jump to report section"><span className="report-nav-title">JUMP TO</span><ul>{reportSections.map(([id, label], index) => <li key={id}><a href={`#${id}`}><span>{String(index + 1).padStart(2, '0')}</span>{label}</a></li>)}</ul></nav>
+        <nav className="report-nav" aria-label="Jump to report section"><span className="report-nav-title">JUMP TO</span><ul>{reportSections.map(([id, label], index) => <li key={id}><a href={`#${id}`} onClick={() => setActiveSection(id)} className={activeSection === id ? 'active' : undefined} aria-current={activeSection === id ? 'location' : undefined}><span>{String(index + 1).padStart(2, '0')}</span>{label}</a></li>)}</ul></nav>
         {error && <p className="error-message report-error" role="alert">{error}</p>}
         {available ? <>
           <div className="report-heading"><div><h1>{report.domainName || rdap.domainName || report.input}</h1><div className="report-kicker">DOMAIN REPORT <span>·</span> {dateLabel(report.analyzedAt)}</div></div><span className="availability-pill available">AVAILABLE</span></div>
