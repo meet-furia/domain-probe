@@ -49,6 +49,16 @@ function App() {
   const [aiError, setAiError] = useState('')
   const [aiOpen, setAiOpen] = useState(false)
   const [activeSection, setActiveSection] = useState(reportSections[0][0])
+  const [openInfo, setOpenInfo] = useState(null)
+
+  useEffect(() => {
+    if (!openInfo) return undefined
+    const closeOnOutsideClick = (event) => {
+      if (!event.target.closest?.('.section-info[aria-expanded="true"]')) setOpenInfo(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+  }, [openInfo])
 
   useEffect(() => {
     if (!report || !('IntersectionObserver' in window)) return undefined
@@ -175,7 +185,8 @@ function App() {
   const copyButton = (key, title, values) => <button type="button" className="copy-button" onClick={() => copyCard(key, title, values)}>{copiedCards[key] ? 'Copied!' : 'Copy'}</button>
   const sectionInfo = (title, description) => {
     const tooltipId = `section-info-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
-    return <button type="button" className="section-info" aria-label={`About ${title}`} aria-describedby={tooltipId}><span className="section-info-glyph" aria-hidden="true">i</span><span className="section-info-tooltip" id={tooltipId} role="tooltip">{description}</span></button>
+    const isOpen = openInfo === title
+    return <button type="button" className="section-info" aria-label={`About ${title}`} aria-describedby={tooltipId} aria-expanded={isOpen} onClick={() => setOpenInfo(isOpen ? null : title)}><span className="section-info-glyph" aria-hidden="true">i</span><span className="section-info-tooltip" id={tooltipId} role="tooltip">{description}</span></button>
   }
   const actionInfo = (title, description) => {
     const tooltipId = `action-info-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
